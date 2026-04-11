@@ -9,8 +9,10 @@ ABL image structure:
 
 from __future__ import annotations
 
+import argparse
 import lzma
 import struct
+import sys
 from pathlib import Path
 
 import lief
@@ -113,4 +115,20 @@ def extract_efi(abl_path: Path) -> bytes:
     decompressed = decompress_fv(fv)
     return extract_pe(decompressed)
 
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Extract EFI from ABL image")
+    parser.add_argument("input", type=Path, help="Path to ABL image")
+    parser.add_argument(
+        "-o", "--output", type=Path, default=Path("LinuxLoader.efi"),
+    )
+    args = parser.parse_args()
+
+    if not args.input.exists():
+        print(f"Error: {args.input} not found", file=sys.stderr)
+        sys.exit(1)
+
+    efi = extract_efi(args.input)
+    args.output.write_bytes(efi)
+    print(f"Extracted {len(efi)} bytes to {args.output}")
 
