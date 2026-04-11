@@ -45,24 +45,7 @@ def decompress_fv(fv: bytes) -> bytes:
     if off == -1:
         raise ValueError("No LZMA compressed section found in FV")
 
-    blob = fv[off:]
-    # Try standard LZMA stream first
-    try:
-        return lzma.decompress(blob)
-    except lzma.LZMAError:
-        pass
-
-    # Fallback: LZMA alone format with unknown size
-    if len(blob) >= 5:
-        header = blob[:5] + struct.pack("<Q", (1 << 64) - 1)
-        try:
-            return lzma.LZMADecompressor(format=lzma.FORMAT_ALONE).decompress(
-                header + blob[5:]
-            )
-        except lzma.LZMAError:
-            pass
-
-    raise ValueError("Failed to decompress LZMA section")
+    return lzma.decompress(fv[off:])
 
 
 def _pe_real_size(pe: lief.PE.Binary) -> int:
