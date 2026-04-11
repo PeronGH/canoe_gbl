@@ -16,10 +16,10 @@ import sys
 from pathlib import Path
 
 import capstone.arm64_const as _ac
-from capstone import CS_ARCH_ARM64, CS_MODE_ARM, Cs
+from capstone import CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN, Cs
 from keystone import KS_ARCH_ARM64, KS_MODE_LITTLE_ENDIAN, Ks
 
-_md = Cs(CS_ARCH_ARM64, CS_MODE_ARM)
+_md = Cs(CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN)
 _md.detail = True
 _ks = Ks(KS_ARCH_ARM64, KS_MODE_LITTLE_ENDIAN)
 
@@ -63,9 +63,7 @@ def _asm(s: str) -> int:
 
 def _disasm(buf, off):
     """Decode single instruction at offset."""
-    for insn in _md.disasm(bytes(buf[off : off + 4]), off):
-        return insn
-    return None
+    return next(_md.disasm(bytes(buf[off : off + 4]), off), None)
 
 
 def _set_rd(raw, new_rd):
