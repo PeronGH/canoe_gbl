@@ -24,7 +24,11 @@ _md.detail = True
 _ks = Ks(KS_ARCH_ARM64, KS_MODE_LITTLE_ENDIAN)
 
 # Register number lookup: Capstone register constant -> 0-31
-_REG_NUM: dict[int, int] = {_ac.ARM64_REG_SP: 31, _ac.ARM64_REG_XZR: 31, _ac.ARM64_REG_WZR: 31}
+_REG_NUM: dict[int, int] = {
+    _ac.ARM64_REG_SP: 31,
+    _ac.ARM64_REG_XZR: 31,
+    _ac.ARM64_REG_WZR: 31,
+}
 for _i in range(31):
     _REG_NUM[getattr(_ac, f"ARM64_REG_X{_i}")] = _i
     _REG_NUM[getattr(_ac, f"ARM64_REG_W{_i}")] = _i
@@ -39,7 +43,7 @@ STK8 = "stk8"
 
 
 def _reg(cs_reg: int) -> int:
-    """Capstone register constant -> register number (0-30, 31 for SP/ZR, -1 for non-GPR)."""
+    """Map Capstone register constant to 0-31, or -1 for non-GPR."""
     return _REG_NUM.get(cs_reg, -1)
 
 
@@ -83,6 +87,7 @@ PACIASP = 0xD503233F
 # Patch 1: Replace UTF-16LE "efisp" with "nulls"
 # =====================================================================
 
+
 def patch_gbl(buf: bytearray) -> None:
     target = "efisp".encode("utf-16-le")
     replacement = "nulls".encode("utf-16-le")
@@ -96,23 +101,64 @@ def patch_gbl(buf: bytearray) -> None:
 # Patch 2: Rewrite ADRL triple (unlocked -> locked)
 # =====================================================================
 
-def _is_adrp_add_pair(buf, off):
-    """Check if off, off+4 form an ADRP+ADD pair with matching Rd."""
+
+def _add_imm_value(insn) -> int | None:
+    """Return ADD-immediate value including optional LSL #12, else None."""
+    imm = insn.operands[2]
+    if imm.type != _ac.ARM64_OP_IMM:
+        return None
+
+    shift = imm.shift
+    if shift.type == _ac.ARM64_SFT_INVALID:
+        return imm.imm
+    if shift.type != _ac.ARM64_SFT_LSL or shift.value not in (0, 12):
+        return None
+    return imm.imm << shift.value
+
+
+def _decode_adrp_add_pair(buf, off) -> tuple[int, int] | None:
+    """Decode ADRP + ADD (immediate) into (register, file_offset)."""
     i0 = _disasm(buf, off)
     i1 = _disasm(buf, off + 4)
     if not i0 or not i1:
-        return False
+        return None
     if i0.id != _ac.ARM64_INS_ADRP or i1.id != _ac.ARM64_INS_ADD:
-        return False
+        return None
+    if len(i0.operands) != 2 or len(i1.operands) != 3:
+        return None
+    if (
+        i0.operands[0].type != _ac.ARM64_OP_REG
+        or i0.operands[1].type != _ac.ARM64_OP_IMM
+    ):
+        return None
+    if (
+        i1.operands[0].type != _ac.ARM64_OP_REG
+        or i1.operands[1].type != _ac.ARM64_OP_REG
+    ):
+        return None
     rd = _reg(i0.operands[0].reg)
-    return _reg(i1.operands[0].reg) == rd and _reg(i1.operands[1].reg) == rd
+    if rd < 0 or _reg(i1.operands[0].reg) != rd or _reg(i1.operands[1].reg) != rd:
+        return None
+
+    add_imm = _add_imm_value(i1)
+    if add_imm is None:
+        return None
+
+    return rd, i0.operands[1].imm + add_imm
+
+
+def _is_adrp_add_pair(buf, off):
+    """Check if off, off+4 form a valid ADRP+ADD (immediate) pair."""
+    return _decode_adrp_add_pair(buf, off) is not None
 
 
 def _adrl_target(buf, off):
     """Compute file offset from ADRP+ADD pair."""
-    i0 = _disasm(buf, off)
-    i1 = _disasm(buf, off + 4)
-    return i0.operands[1].imm + i1.operands[2].imm
+    pair = _decode_adrp_add_pair(buf, off)
+    if pair is None:
+        raise ValueError(f"Invalid ADRP+ADD(immediate) pair at 0x{off:X}")
+    _, target = pair
+    return target
 
 
 def _str_at(buf, off, needle):
@@ -125,29 +171,25 @@ def _scan_adrl_triples(buf, str0, str1, str2):
     count = 0
     i = 0
     while i <= size - 24:
-        if not (
-            _is_adrp_add_pair(buf, i)
-            and _is_adrp_add_pair(buf, i + 8)
-            and _is_adrp_add_pair(buf, i + 16)
-        ):
+        pair0 = _decode_adrp_add_pair(buf, i)
+        pair1 = _decode_adrp_add_pair(buf, i + 8)
+        pair2 = _decode_adrp_add_pair(buf, i + 16)
+        if not (pair0 and pair1 and pair2):
             i += 4
             continue
 
-        i0 = _disasm(buf, i)
-        i8 = _disasm(buf, i + 8)
-        i16 = _disasm(buf, i + 16)
-        ra = _reg(i0.operands[0].reg)
-        rb = _reg(i8.operands[0].reg)
-        rc = _reg(i16.operands[0].reg)
+        ra, off0 = pair0
+        rb, off1 = pair1
+        rc, off2 = pair2
         if ra == rb or rb == rc or ra == rc:
             i += 4
             continue
 
-        off0 = _adrl_target(buf, i)
-        off1 = _adrl_target(buf, i + 8)
-        off2 = _adrl_target(buf, i + 16)
-
-        if _str_at(buf, off0, str0) and _str_at(buf, off1, str1) and _str_at(buf, off2, str2):
+        if (
+            _str_at(buf, off0, str0)
+            and _str_at(buf, off1, str1)
+            and _str_at(buf, off2, str2)
+        ):
             count += 1
             yield i, ra, rb, rc
             i += 24
@@ -157,7 +199,9 @@ def _scan_adrl_triples(buf, str0, str1, str2):
 
 def patch_device_state(buf: bytearray) -> None:
     patched = 0
-    for off, ra, rb, rc in _scan_adrl_triples(buf, b"unlocked", b"locked", b"androidboot.vbmeta.device_state"):
+    for off, ra, rb, rc in _scan_adrl_triples(
+        buf, b"unlocked", b"locked", b"androidboot.vbmeta.device_state"
+    ):
         # Copy pair-1's ADRP+ADD encoding but with pair-0's register
         _w32(buf, off, _set_rd(_r32(buf, off + 8), ra))
         _w32(buf, off + 4, _set_rd_rn(_r32(buf, off + 12), ra))
@@ -167,7 +211,12 @@ def patch_device_state(buf: bytearray) -> None:
         raise ValueError("ADRL triple (unlocked/locked/device_state) not found")
 
     # Verify: both pair-0 and pair-1 now point to "locked"
-    verified = sum(1 for _ in _scan_adrl_triples(buf, b"locked", b"locked", b"androidboot.vbmeta.device_state"))
+    verified = sum(
+        1
+        for _ in _scan_adrl_triples(
+            buf, b"locked", b"locked", b"androidboot.vbmeta.device_state"
+        )
+    )
     if verified == 0:
         raise ValueError("ADRL verification failed")
 
@@ -177,17 +226,73 @@ def patch_device_state(buf: bytearray) -> None:
 # =====================================================================
 
 BOOT_PATTERN = [
-    -1, 0x00, 0x00, 0x34, 0x28, 0x00, 0x80, 0x52,
-    0x06, 0x00, 0x00, 0x14, 0xE8, -1, 0x40, 0xF9,
-    0x08, 0x01, 0x40, 0x39, 0x1F, 0x01, 0x00, 0x71,
-    0xE8, 0x07, 0x9F, 0x1A, 0x08, 0x79, 0x1F, 0x53,
+    -1,
+    0x00,
+    0x00,
+    0x34,
+    0x28,
+    0x00,
+    0x80,
+    0x52,
+    0x06,
+    0x00,
+    0x00,
+    0x14,
+    0xE8,
+    -1,
+    0x40,
+    0xF9,
+    0x08,
+    0x01,
+    0x40,
+    0x39,
+    0x1F,
+    0x01,
+    0x00,
+    0x71,
+    0xE8,
+    0x07,
+    0x9F,
+    0x1A,
+    0x08,
+    0x79,
+    0x1F,
+    0x53,
 ]
 
 BOOT_PATCH = [
-    -1, -1, -1, -1, 0x08, -1, -1, -1,
-    -1, -1, -1, -1, -1, -1, -1, -1,
-    -1, -1, -1, -1, -1, -1, -1, -1,
-    -1, -1, -1, -1, -1, -1, -1, -1,
+    -1,
+    -1,
+    -1,
+    -1,
+    0x08,
+    -1,
+    -1,
+    -1,
+    -1,
+    -1,
+    -1,
+    -1,
+    -1,
+    -1,
+    -1,
+    -1,
+    -1,
+    -1,
+    -1,
+    -1,
+    -1,
+    -1,
+    -1,
+    -1,
+    -1,
+    -1,
+    -1,
+    -1,
+    -1,
+    -1,
+    -1,
+    -1,
 ]
 
 
@@ -232,7 +337,9 @@ def _is_x_sized(insn):
     return insn.operands[0].reg not in _W_REGS
 
 
-def _trace_backward(buf: bytearray, anchor_off: int, target_reg: int) -> tuple[int, int]:
+def _trace_backward(
+    buf: bytearray, anchor_off: int, target_reg: int
+) -> tuple[int, int]:
     """Trace backward from anchor to find source LDRB. Patch it to MOV Wn, #1."""
     current = target_reg
     off = anchor_off - 4
@@ -281,7 +388,11 @@ def _trace_backward(buf: bytearray, anchor_off: int, target_reg: int) -> tuple[i
             continue
 
         # Byte stack reload bounce: LDRB Wt, [SP, #imm]
-        if insn.id == _ac.ARM64_INS_LDRB and _is_sp_based(insn) and _rt_num(insn) == current:
+        if (
+            insn.id == _ac.ARM64_INS_LDRB
+            and _is_sp_based(insn)
+            and _rt_num(insn) == current
+        ):
             byte_disp = _disp(insn)
             search = off - 4
             found = False
@@ -308,7 +419,11 @@ def _trace_backward(buf: bytearray, anchor_off: int, target_reg: int) -> tuple[i
             continue
 
         # Source: LDRB Wt, [Xn!=SP, #imm]
-        if insn.id == _ac.ARM64_INS_LDRB and _rt_num(insn) == current and not _is_sp_based(insn):
+        if (
+            insn.id == _ac.ARM64_INS_LDRB
+            and _rt_num(insn) == current
+            and not _is_sp_based(insn)
+        ):
             _w32(buf, off, _asm(f"MOV W{current}, #1"))
             return off, current
 
@@ -318,9 +433,12 @@ def _trace_backward(buf: bytearray, anchor_off: int, target_reg: int) -> tuple[i
 
 
 def _trace_forward_patch_strb(
-    buf: bytearray, ldrb_off: int, src_reg: int, anchor_off: int,
+    buf: bytearray,
+    ldrb_off: int,
+    src_reg: int,
+    anchor_off: int,
 ) -> None:
-    """Trace forward from patched LDRB to find sink STRB after anchor. Patch Rt to WZR."""
+    """Trace forward from patched LDRB to find and patch the sink STRB."""
     size = len(buf)
     taint: set[tuple[str, int]] = {(REG, src_reg)}
 
@@ -397,6 +515,7 @@ def patch_bootstate(buf: bytearray) -> None:
 # =====================================================================
 # Orchestrator
 # =====================================================================
+
 
 def patch_efi(buf: bytearray) -> bytearray:
     patch_gbl(buf)

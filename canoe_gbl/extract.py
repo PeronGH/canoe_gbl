@@ -103,7 +103,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Extract EFI from ABL image")
     parser.add_argument("input", type=Path, help="Path to ABL image")
     parser.add_argument(
-        "-o", "--output", type=Path, default=Path("LinuxLoader.efi"),
+        "-o",
+        "--output",
+        type=Path,
+        default=Path("LinuxLoader.efi"),
     )
     args = parser.parse_args()
 
@@ -114,4 +117,3 @@ if __name__ == "__main__":
     efi = extract_efi(args.input)
     args.output.write_bytes(efi)
     print(f"Extracted {len(efi)} bytes to {args.output}")
-
