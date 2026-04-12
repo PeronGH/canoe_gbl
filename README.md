@@ -13,11 +13,20 @@ Affects any Snapdragon 8 Elite Gen 5 phone without Qualcomm's March 2026 ABL pat
 
 ## Usage
 
-```bash
-uv run python -m canoe_gbl.extract abl.img -o LinuxLoader.efi
-uv run python -m canoe_gbl.patch LinuxLoader.efi -o LinuxLoader_patched.efi
-fastboot flash efisp LinuxLoader_patched.efi
-```
+I tested this on all stock firmware. The only other change was a patched `init_boot`. I suspect other partition modifications may prevent boot or break Play Integrity.
+
+1. Extract and patch GBL:
+   ```bash
+   uv run python -m canoe_gbl.extract abl.img -o LinuxLoader.efi
+   uv run python -m canoe_gbl.patch LinuxLoader.efi -o LinuxLoader_patched.efi
+   ```
+2. Flash to `efisp`:
+   ```bash
+   fastboot flash efisp LinuxLoader_patched.efi
+   ```
+3. Reboot into recovery and wipe data.
+
+Other approaches (skip the data wipe, modify other partitions, etc.) might work too but I haven't tested them. If something goes wrong, revert with `fastboot erase efisp`. If you get something else working, open an issue and I'll update this.
 
 ## What the patcher does
 
