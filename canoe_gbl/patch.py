@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import struct
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 import capstone.arm64_const as _ac
@@ -80,6 +81,25 @@ def _set_rd_rn(raw, new_reg):
 
 
 PACIASP = 0xD503233F
+
+
+@dataclass(frozen=True)
+class _InsnPattern:
+    asm: str
+    mask: int
+    value: int
+
+    def matches(self, raw: int) -> bool:
+        return raw & self.mask == self.value
+
+
+@dataclass(frozen=True)
+class _InsnPatch:
+    asm: str
+    value: int
+
+    def apply(self, buf: bytearray, off: int) -> None:
+        _w32(buf, off, self.value)
 
 
 # =====================================================================
@@ -224,91 +244,46 @@ def patch_device_state(buf: bytearray) -> None:
 # Patches 3/4/5: Boot state pattern + data-flow patching
 # =====================================================================
 
-BOOT_PATTERN = [
-    -1,
-    0x00,
-    0x00,
-    0x34,
-    0x28,
-    0x00,
-    0x80,
-    0x52,
-    0x06,
-    0x00,
-    0x00,
-    0x14,
-    0xE8,
-    -1,
-    0x40,
-    0xF9,
-    0x08,
-    0x01,
-    0x40,
-    0x39,
-    0x1F,
-    0x01,
-    0x00,
-    0x71,
-    0xE8,
-    0x07,
-    0x9F,
-    0x1A,
-    0x08,
-    0x79,
-    0x1F,
-    0x53,
+BOOT_PATTERN: list[_InsnPattern] = [
+    _InsnPattern("cbz w<lock_reg>, <skip>", 0xFFFFFF00, 0x34000000),
+    _InsnPattern("mov w8, #1", 0xFFFFFFFF, _mov_w_imm(8, 1)),
+    _InsnPattern("b <after_load>", 0xFFFFFFFF, 0x14000006),
+    _InsnPattern("ldr x8, [x?, #?]", 0xFFFF00FF, 0xF94000E8),
+    _InsnPattern("ldrb w8, [x8]", 0xFFFFFFFF, 0x39400108),
+    _InsnPattern("cmp w8, #0", 0xFFFFFFFF, 0x7100011F),
+    _InsnPattern("cset w8, ne", 0xFFFFFFFF, 0x1A9F07E8),
+    _InsnPattern("lsl w8, w8, #1", 0xFFFFFFFF, 0x531F7908),
 ]
 
-BOOT_PATCH = [
-    -1,
-    -1,
-    -1,
-    -1,
-    0x08,
-    -1,
-    -1,
-    -1,
-    -1,
-    -1,
-    -1,
-    -1,
-    -1,
-    -1,
-    -1,
-    -1,
-    -1,
-    -1,
-    -1,
-    -1,
-    -1,
-    -1,
-    -1,
-    -1,
-    -1,
-    -1,
-    -1,
-    -1,
-    -1,
-    -1,
-    -1,
-    -1,
+BOOT_PATCH: list[_InsnPatch | None] = [
+    None,
+    _InsnPatch("mov w8, #0", _mov_w_imm(8, 0)),
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
 ]
 
 
 def _find_and_patch_boot_pattern(buf: bytearray) -> tuple[int, int]:
     """Find boot state pattern, apply patch 3, return (anchor_offset, lock_register)."""
-    plen = len(BOOT_PATTERN)
+    plen = len(BOOT_PATTERN) * 4
     anchor = -1
     lock_reg = -1
 
     i = 0
     while i <= len(buf) - plen:
-        if all(p == -1 or buf[i + j] == p for j, p in enumerate(BOOT_PATTERN)):
-            lock_reg = buf[i] & 0x1F
+        if all(
+            pattern.matches(_r32(buf, i + j * 4))
+            for j, pattern in enumerate(BOOT_PATTERN)
+        ):
+            lock_reg = _r32(buf, i) & 0x1F
             anchor = i
-            for j, p in enumerate(BOOT_PATCH):
-                if p != -1:
-                    buf[i + j] = p
+            for j, patch in enumerate(BOOT_PATCH):
+                if patch is not None:
+                    patch.apply(buf, i + j * 4)
             i += plen
         else:
             i += 1
