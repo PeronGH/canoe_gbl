@@ -13,7 +13,7 @@ Affects any Snapdragon 8 Elite Gen 5 phone without Qualcomm's March 2026 ABL pat
 
 ## Usage
 
-I tested this on all stock firmware. The only other change was a patched `init_boot`. I suspect other partition modifications may prevent boot or break Play Integrity.
+I tested this on all stock firmware. The only other change was a patched `init_boot` (with KernelSU Next). I suspect other partition modifications may prevent boot or break Play Integrity.
 
 1. Extract and patch GBL:
    ```bash
@@ -38,6 +38,12 @@ Other approaches (skip the data wipe, modify other partitions, etc.) might work 
 6. Zeros out the lock state write via forward taint tracking
 
 The TEE derives its boot state from ABL. Since the patched GBL reports locked state, the hardware key attestation passes, which gives STRONG Play Integrity and Widevine L1.
+
+## Credits
+
+- [Qualcomm GBL Exploit PoC](https://github.com/kasnria001/qualcomm_gbl_exploit_poc)
+- [Original C implementation](https://github.com/superturtlee/gbl_root_canoe)
+- [Fork of original implementation](https://github.com/fggdc/gbl_root_canoe_abl_701)
 
 ## License
 
