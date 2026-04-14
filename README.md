@@ -32,9 +32,10 @@ Other approaches (skip the data wipe, modify other partitions, etc.) might work 
 
 1. Replaces the `efisp` reference with `nulls` so the patched GBL doesn't recursively load itself
 2. Rewrites `androidboot.vbmeta.device_state` to always report `locked`
-3. Patches the boot state check sequence
-4. Hardcodes the lock state read to 1 via backward data-flow tracing
-5. Zeros out the lock state write via forward taint tracking
+3. Skips the unlock warning/countdown path
+4. Patches the boot state check sequence
+5. Hardcodes the lock state read to 1 via backward data-flow tracing
+6. Zeros out the lock state write via forward taint tracking
 
 The TEE derives its boot state from ABL. Since the patched GBL reports locked state, the hardware key attestation passes, which gives STRONG Play Integrity and Widevine L1.
 

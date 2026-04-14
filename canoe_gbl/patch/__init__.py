@@ -1,11 +1,12 @@
 """Patch LinuxLoader.efi to report locked boot state.
 
-Applies 5 patches:
+Applies 6 patches:
   1. Replace UTF-16 "efisp" with "nulls" (disable EFI system partition)
   2. Rewrite ADRL triple so device_state always reports "locked"
-  3. Patch boot state check pattern
-  4. Replace source LDRB with MOV Wn, #1 (hardcode locked)
-  5. Replace sink STRB Rt with WZR (zero out lock state write)
+  3. Hide the unlock warning/countdown
+  4. Patch boot state check pattern
+  5. Replace source LDRB with MOV Wn, #1 (hardcode locked)
+  6. Replace sink STRB Rt with WZR (zero out lock state write)
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from pathlib import Path
 
 from .bootstate import BOOT_PATCH, BOOT_PATTERN, patch_bootstate
 from .device_state import patch_device_state
+from .warning import UNLOCK_WARNING_PATTERN, patch_unlock_warning
 
 
 def patch_gbl(buf: bytearray) -> None:
@@ -30,6 +32,7 @@ def patch_gbl(buf: bytearray) -> None:
 def patch_efi(buf: bytearray) -> bytearray:
     patch_gbl(buf)
     patch_device_state(buf)
+    patch_unlock_warning(buf)
     patch_bootstate(buf)
     return buf
 
@@ -54,9 +57,11 @@ def main(argv: list[str] | None = None) -> int:
 __all__ = [
     "BOOT_PATCH",
     "BOOT_PATTERN",
+    "UNLOCK_WARNING_PATTERN",
     "main",
     "patch_bootstate",
     "patch_device_state",
     "patch_efi",
     "patch_gbl",
+    "patch_unlock_warning",
 ]
