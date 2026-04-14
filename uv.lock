@@ -8,14 +8,12 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "capstone" },
-    { name = "keystone-engine" },
     { name = "lief" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "capstone", specifier = ">=5.0.7" },
-    { name = "keystone-engine", specifier = ">=0.9.2" },
     { name = "lief", specifier = ">=0.17.6" },
 ]
 
@@ -35,19 +33,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/e1/51/e3913f53ed03a8f7311b1efacbc1052811e129baa37b4f14e79da3cbc0c6/capstone-5.0.7-py3-none-musllinux_1_2_i686.whl", hash = "sha256:e551311d4b6dc344fe5518ef6decf4c2dfafe37bba9ad027a53a406930bc5c63", size = 1484528, upload-time = "2026-02-09T22:51:52.483Z" },
     { url = "https://files.pythonhosted.org/packages/0b/98/a7d631f7bca9de02357637cfab1fb90a67992905f2041357ac5732c8a4cd/capstone-5.0.7-py3-none-musllinux_1_2_x86_64.whl", hash = "sha256:a13437b28b136c886600e88bee192d25adf56ba1db5597ff5a0bec758bb9c533", size = 1486041, upload-time = "2026-02-09T22:51:53.729Z" },
     { url = "https://files.pythonhosted.org/packages/70/39/2138d890a8e827636b9de9924fbc8527fe83e38b6d26605b30ac55e30ebe/capstone-5.0.7-py3-none-win_amd64.whl", hash = "sha256:4ab8bcb7da8f221ff45926ca168ca33e76f7237d06fbf3c10780002faa2670e1", size = 1272204, upload-time = "2026-02-09T22:51:54.829Z" },
-]
-
-[[package]]
-name = "keystone-engine"
-version = "0.9.2"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/0a/65/3a2e7e55cc1db188869bbbacee60036828330e0ce57fc5f05a3167ab4b4d/keystone-engine-0.9.2.tar.gz", hash = "sha256:2f7af62dab0ce6c2732dbb4f31cfa2184a8a149e280b96b92ebc0db84c6e50f5", size = 2813059, upload-time = "2020-06-21T14:13:59.951Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/1c/ad/a609493a534049cae43660689b2c5908117746e238f12dc76619d68a223a/keystone_engine-0.9.2-py2.py3-none-macosx_10_14_x86_64.whl", hash = "sha256:dafcc3d9450c239cbc54148855b79c4b387777099c6d054005c835768cf955f2", size = 2950758, upload-time = "2020-06-21T14:13:53.225Z" },
-    { url = "https://files.pythonhosted.org/packages/0b/cf/b8eb6956565e91a9a003b1c612765cfe007a1d0b1c6e667dc569ea519f51/keystone_engine-0.9.2-py2.py3-none-manylinux1_i686.whl", hash = "sha256:9e04dea5a2b50509b7b707abdb395de42772c40faa36131ea94482fba8dd5d9f", size = 1785427, upload-time = "2020-06-21T14:13:54.624Z" },
-    { url = "https://files.pythonhosted.org/packages/01/5c/40ffbec589262f49ff7c463d96ff0bfab0fbd98d9d869c370a70853a13fb/keystone_engine-0.9.2-py2.py3-none-manylinux1_x86_64.whl", hash = "sha256:5a5316a34323620b1bba31dcfe9e4b4ca6f0c030e82fc7a151da7c8fbe81a379", size = 1766182, upload-time = "2020-06-21T14:13:55.817Z" },
-    { url = "https://files.pythonhosted.org/packages/88/b9/a9d8b6837346b86bcdda56e5c3fe4ac51f98f4ed40bf71fb6bd8605516da/keystone_engine-0.9.2-py2.py3-none-win32.whl", hash = "sha256:9f81e480904a405ef008f1d9f0e4a05e37d2bd83c5218a27136e1a294b02c1f6", size = 1318239, upload-time = "2020-06-21T14:13:57.122Z" },
-    { url = "https://files.pythonhosted.org/packages/a4/8d/58471cb026de45397b29ba4b37ae3e20b434fae14c4b92fd3e9771a7bac8/keystone_engine-0.9.2-py2.py3-none-win_amd64.whl", hash = "sha256:c91db1ff16d9d094e00d1827107d1b4afd5e63ce19b491a0140e660635000e8b", size = 1370823, upload-time = "2020-06-21T14:13:58.476Z" },
 ]
 
 [[package]]

@@ -17,11 +17,9 @@ from pathlib import Path
 
 import capstone.arm64_const as _ac
 from capstone import CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN, Cs
-from keystone import KS_ARCH_ARM64, KS_MODE_LITTLE_ENDIAN, Ks
 
 _md = Cs(CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN)
 _md.detail = True
-_ks = Ks(KS_ARCH_ARM64, KS_MODE_LITTLE_ENDIAN)
 
 # Register number lookup: Capstone register constant -> 0-31
 _REG_NUM: dict[int, int] = {
@@ -55,10 +53,13 @@ def _w32(buf, off, val):
     struct.pack_into("<I", buf, off, val)
 
 
-def _asm(s: str) -> int:
-    """Assemble a single ARM64 instruction, return as 32-bit int."""
-    enc, _ = _ks.asm(s)
-    return struct.unpack("<I", bytes(enc))[0]
+def _mov_w_imm(rd: int, imm16: int) -> int:
+    """Encode `mov w<rd>, #<imm16>` as its MOVZ alias."""
+    if not 0 <= rd <= 30:
+        raise ValueError(f"Invalid W register: {rd}")
+    if not 0 <= imm16 <= 0xFFFF:
+        raise ValueError(f"Immediate out of range: {imm16}")
+    return 0x52800000 | (imm16 << 5) | rd
 
 
 def _disasm(buf, off):
@@ -422,7 +423,7 @@ def _trace_backward(
             and _rt_num(insn) == current
             and not _is_sp_based(insn)
         ):
-            _w32(buf, off, _asm(f"MOV W{current}, #1"))
+            _w32(buf, off, _mov_w_imm(current, 1))
             return off, current
 
         off -= 4
