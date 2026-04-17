@@ -2,7 +2,7 @@
 
 Qualcomm ABL loads `efisp` early in boot without signature verification. This tool patches ABL and flashes it to `efisp` as GBL, taking over the boot and spoofing locked state.
 
-Affects any Snapdragon 8 Elite Gen 5 phone without Qualcomm's March 2026 ABL patch, excluding Samsung. Developed and tested on OnePlus 15 (`canoe`).
+Affects any Snapdragon 8 Elite Gen 5 (`canoe`) phone without Qualcomm's March 2026 ABL patch, excluding Samsung. Developed and tested on OnePlus 15.
 
 **For security research only. Use at your own risk.**
 
