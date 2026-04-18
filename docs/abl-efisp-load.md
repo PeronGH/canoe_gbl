@@ -1,6 +1,6 @@
 # When ABL loads `efisp`
 
-Notes from reverse-engineering OnePlus `LinuxLoader.efi` (both ABL 503 and 700 builds behave identically here). File offsets below are into the extracted PE; base is 0.
+Notes from reverse-engineering OnePlus `LinuxLoader.efi` extracted from a OnePlus 15 ABL. Both `16.0.5.700` and `16.0.3.503` builds behave identically here. File offsets below are into the extracted PE; base is 0.
 
 ## TL;DR
 
