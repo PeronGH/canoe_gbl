@@ -39,6 +39,10 @@ Other approaches (skip the data wipe, modify other partitions, etc.) might work 
 
 The TEE derives its boot state from ABL. Since the patched GBL reports locked state, the hardware key attestation passes, which gives STRONG Play Integrity and Widevine L1.
 
+## Variants
+
+- [`variant/custom-kernel`](https://github.com/PeronGH/canoe_gbl/tree/variant/custom-kernel) — reports `verifiedbootstate=orange` and `veritymode=logging` to the kernel instead of spoofing locked/enforcing. Third-party recoveries can decrypt data and you can modify `system`/`vendor`/`product`. Requires a custom kernel that spoofs those two cmdline strings back to `green`/`enforcing` for Play Integrity (trivial with a Susfs-capable kernel).
+
 ## Credits
 
 - [Qualcomm GBL Exploit PoC](https://github.com/kasnria001/qualcomm_gbl_exploit_poc)
