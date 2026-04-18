@@ -8,6 +8,9 @@ from dataclasses import dataclass
 import capstone.arm64_const as _ac
 from capstone import CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN, Cs
 
+ADRP_PAGE_MASK = ~0xFFF & ((1 << 64) - 1)
+ADRP_LO12_MASK = 0xFFF
+
 _md = Cs(CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN)
 _md.detail = True
 
@@ -126,3 +129,72 @@ def iter_forward_insns(buf: bytearray, start_off: int):
         insn = disasm(buf, off)
         if insn:
             yield off, insn
+
+
+@dataclass(frozen=True)
+class AdrlPair:
+    reg: int
+    target: int
+
+
+def _add_imm_value(insn) -> int | None:
+    imm = insn.operands[2]
+    if imm.type != _ac.ARM64_OP_IMM:
+        return None
+    shift = imm.shift
+    if shift.type == _ac.ARM64_SFT_INVALID:
+        return imm.imm
+    if shift.type != _ac.ARM64_SFT_LSL or shift.value not in (0, 12):
+        return None
+    return imm.imm << shift.value
+
+
+def decode_adrp_add_pair(buf: bytearray, off: int) -> AdrlPair | None:
+    """Decode ADRP + ADD (immediate) into (register, target_offset).
+
+    Target is a file offset when `disasm` was called with the file offset as PC.
+    """
+    i0 = disasm(buf, off)
+    i1 = disasm(buf, off + INSN_SIZE)
+    if not i0 or not i1:
+        return None
+    if i0.id != _ac.ARM64_INS_ADRP or i1.id != _ac.ARM64_INS_ADD:
+        return None
+    if len(i0.operands) != 2 or len(i1.operands) != 3:
+        return None
+    if (
+        i0.operands[0].type != _ac.ARM64_OP_REG
+        or i0.operands[1].type != _ac.ARM64_OP_IMM
+        or i1.operands[0].type != _ac.ARM64_OP_REG
+        or i1.operands[1].type != _ac.ARM64_OP_REG
+    ):
+        return None
+
+    rd = reg_num(i0.operands[0].reg)
+    if rd < 0 or reg_num(i1.operands[0].reg) != rd or reg_num(i1.operands[1].reg) != rd:
+        return None
+
+    add_imm = _add_imm_value(i1)
+    if add_imm is None:
+        return None
+
+    return AdrlPair(rd, i0.operands[1].imm + add_imm)
+
+
+def encode_adrp_add_pair(pc: int, target: int, rd: int) -> tuple[int, int]:
+    """Encode `adrp xRd, <page of target>` and `add xRd, xRd, #<lo12>`."""
+    if not 0 <= rd <= 30:
+        raise ValueError(f"Invalid register: x{rd}")
+    page_delta = (target & ADRP_PAGE_MASK) - (pc & ADRP_PAGE_MASK)
+    if page_delta % 0x1000:
+        raise ValueError(f"ADRP page delta not page-aligned: 0x{page_delta:X}")
+    imm21 = page_delta >> 12
+    if not -(1 << 20) <= imm21 < (1 << 20):
+        raise ValueError(f"ADRP page delta out of range: 0x{page_delta:X}")
+    imm21 &= 0x1FFFFF
+    immlo = imm21 & 0x3
+    immhi = (imm21 >> 2) & 0x7FFFF
+    adrp = 0x90000000 | (immlo << 29) | (immhi << 5) | rd
+    lo12 = target & ADRP_LO12_MASK
+    add = 0x91000000 | (lo12 << 10) | (rd << 5) | rd
+    return adrp, add
