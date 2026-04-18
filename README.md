@@ -1,19 +1,30 @@
-# canoe_gbl
+# canoe_gbl — custom-kernel variant
 
-Qualcomm ABL loads `efisp` early in boot without signature verification. This tool patches ABL and flashes it to `efisp` as GBL, taking over the boot and spoofing locked state.
+Parallel variant of [`next`](https://github.com/PeronGH/canoe_gbl/tree/next). **Only use this if you run a custom kernel that can spoof the verified-boot cmdline back to locked/green/enforcing** (trivial with e.g. a KernelSU/SukiSU kernel and Susfs).
 
-Affects any Snapdragon 8 Elite Gen 5 (`canoe`) phone without Qualcomm's March 2026 ABL patch, excluding Samsung. Developed and tested on OnePlus 15.
+This branch is a faithful Python port of [1vivy-fork/main](https://github.com/1vivy/gbl_root_canoe) — running `uv run python -m canoe_gbl.patch` on an extracted `LinuxLoader.efi` produces bit-for-bit identical output to their C `tools/patch_abl` binary.
 
-**For security research only. Use at your own risk.**
+## What's different from `next`
+
+The main branch spoofs the full lock-state chain so Android sees a locked+verified device even when the bootloader is unlocked. This variant is more surgical:
+
+- `androidboot.verifiedbootstate` is left at its natural `orange` (via a helper-site override) instead of forced to `green`. Third-party recoveries (TWRP, OrangeFox) can decrypt data and boot cleanly, instead of bailing on state-vs-signing mismatch.
+- `androidboot.veritymode` is rewritten to `logging` instead of `enforcing`. dm-verity errors on modified `system`/`vendor`/`product` partitions become non-fatal, so you can actually modify those partitions.
+- `fastboot flash` / `erase` is allowed even while the bootloader reports itself as locked (upstream's "… is not allowed in Lock State" jump NOPs).
+
+TEE attestation still reports the spoofed locked state (via the other patches: `vbmeta.device_state=locked`, pinned internal lock booleans), so STRONG Play Integrity and Widevine L1 are preserved — **provided your kernel rewrites the two cmdline strings above back to `green`/`enforcing` before init reads them**. That kernel-side spoof is standard fare for any Susfs-capable kernel.
+
+If you don't have a kernel that does this, stay on `next` — it reports green/enforcing directly from ABL and works without kernel cooperation.
 
 ## Prerequisites
 
 - An unlocked bootloader
 - Stock `abl.img` from your device
+- A kernel that spoofs `androidboot.verifiedbootstate=green` and `androidboot.veritymode=enforcing` in its cmdline rewrite pass
 
 ## Usage
 
-I tested this on all stock firmware. The only other change was a patched `init_boot` (with KernelSU Next). I suspect other partition modifications may prevent boot or break Play Integrity.
+Same as `next`:
 
 1. Extract and patch GBL:
    ```bash
@@ -26,24 +37,26 @@ I tested this on all stock firmware. The only other change was a patched `init_b
    ```
 3. Reboot into recovery and wipe data.
 
-Other approaches (skip the data wipe, modify other partitions, etc.) might work too but I haven't tested them. If something goes wrong, revert with `fastboot erase efisp`. If you get something else working, open an issue and I'll update this.
+If something goes wrong, revert with `fastboot erase efisp`.
 
 ## What the patcher does
 
 1. Replaces the `efisp` reference with `nulls` so the patched GBL doesn't recursively load itself
 2. Rewrites `androidboot.vbmeta.device_state` to always report `locked`
-3. Skips the unlock warning/countdown path
-4. Patches the boot state check sequence
-5. Hardcodes the lock state read to 1 via backward data-flow tracing
-6. Zeros out the lock state write via forward taint tracking
-
-The TEE derives its boot state from ABL. Since the patched GBL reports locked state, the hardware key attestation passes, which gives STRONG Play Integrity and Widevine L1.
+3. NOPs direct jumps to the "… is not allowed in Lock State" error strings, so `fastboot flash` / `erase` works without unlock
+4. Patches the boot-state check sequence
+5. Hardcodes the lock-state read to 1 via backward data-flow tracing
+6. Zeros out the lock-state write via forward taint tracking
+7. Overrides the `verifiedbootstate=` cmdline helper to always index `orange` (leaves internal `boot_state` untouched, so TEE still sees locked)
+8. Retargets `androidboot.veritymode` loads (both the cmdline ADRP+ADD and the verity-setup pointer table) to `logging`
+9. Rewrites the orange-warning guard CBZ as an unconditional B, skipping the screen + 5-second countdown
 
 ## Credits
 
 - [Qualcomm GBL Exploit PoC](https://github.com/kasnria001/qualcomm_gbl_exploit_poc)
 - [Original C implementation](https://github.com/superturtlee/gbl_root_canoe)
-- [Fork of original implementation](https://github.com/fggdc/gbl_root_canoe_abl_701)
+- [1vivy's fork](https://github.com/1vivy/gbl_root_canoe) — source of the orange/logging patches
+- [fggdc's fork](https://github.com/fggdc/gbl_root_canoe_abl_701)
 
 ## License
 
