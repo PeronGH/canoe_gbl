@@ -61,6 +61,9 @@ def write_u32(buf: bytearray, off: int, val: int) -> None:
     struct.pack_into("<I", buf, off, val)
 
 
+NOP = 0xD503201F
+
+
 def mov_w_imm(rd: int, imm16: int) -> int:
     """Encode `mov w<rd>, #<imm16>` as its MOVZ alias."""
     if not 0 <= rd <= 30:
@@ -68,6 +71,26 @@ def mov_w_imm(rd: int, imm16: int) -> int:
     if not 0 <= imm16 <= 0xFFFF:
         raise ValueError(f"Immediate out of range: {imm16}")
     return 0x52800000 | (imm16 << 5) | rd
+
+
+def mov_x_imm(rd: int, imm16: int) -> int:
+    """Encode `mov x<rd>, #<imm16>` as its MOVZ alias (64-bit)."""
+    if not 0 <= rd <= 30:
+        raise ValueError(f"Invalid X register: {rd}")
+    if not 0 <= imm16 <= 0xFFFF:
+        raise ValueError(f"Immediate out of range: {imm16}")
+    return 0xD2800000 | (imm16 << 5) | rd
+
+
+def cbz_imm19(raw: int) -> int:
+    """Return the signed 19-bit immediate (in instruction words) of a CBZ/CBNZ."""
+    imm = (raw >> 5) & 0x7FFFF
+    return imm - (1 << 19) if imm & (1 << 18) else imm
+
+
+def encode_b(imm26: int) -> int:
+    """Encode `b` with a signed 26-bit immediate (in instruction words)."""
+    return 0x14000000 | (imm26 & 0x03FFFFFF)
 
 
 def disasm(buf: bytearray, off: int):
