@@ -6,13 +6,13 @@ This branch is a faithful Python port of [1vivy-fork/main](https://github.com/1v
 
 ## What's different from `next`
 
-The main branch spoofs the full lock-state chain so Android sees a locked+verified device even when the bootloader is unlocked. This variant is more surgical:
+`next` spoofs the full lock-state chain so Android sees a locked+verified device even when the bootloader is unlocked. This variant keeps all of that and adds three further patches:
 
-- `androidboot.verifiedbootstate` is left at its natural `orange` (via a helper-site override) instead of forced to `green`. Third-party recoveries (TWRP, OrangeFox) can decrypt data and boot cleanly, instead of bailing on state-vs-signing mismatch.
+- `androidboot.verifiedbootstate` is forced to `orange` via an override at the cmdline helper site (Patch 7). Third-party recoveries (TWRP, OrangeFox) can then decrypt data and boot cleanly instead of bailing on the state-vs-signing mismatch that `next`'s `green` produces.
 - `androidboot.veritymode` is rewritten to `logging` instead of `enforcing`. dm-verity errors on modified `system`/`vendor`/`product` partitions become non-fatal, so you can actually modify those partitions.
 - `fastboot flash` / `erase` is allowed even while the bootloader reports itself as locked (upstream's "… is not allowed in Lock State" jump NOPs).
 
-TEE attestation still reports the spoofed locked state (via the other patches: `vbmeta.device_state=locked`, pinned internal lock booleans), so STRONG Play Integrity and Widevine L1 are preserved — **provided your kernel rewrites the two cmdline strings above back to `green`/`enforcing` before init reads them**. That kernel-side spoof is standard fare for any Susfs-capable kernel.
+TEE attestation is unaffected. TEE sees the spoofed locked state through `next`'s bootstate source/sink patches, which pin the internal lock booleans that the ABL→TEE handoff reads — a path entirely separate from the kernel cmdline this variant modifies. STRONG Play Integrity and Widevine L1 are preserved **provided your kernel rewrites `androidboot.verifiedbootstate=green` and `androidboot.veritymode=enforcing` back before init consumes them**. That kernel-side spoof is standard fare for any Susfs-capable kernel.
 
 If you don't have a kernel that does this, stay on `next` — it reports green/enforcing directly from ABL and works without kernel cooperation.
 
