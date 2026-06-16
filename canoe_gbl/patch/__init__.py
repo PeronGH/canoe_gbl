@@ -8,19 +8,16 @@ Applies these patches in order:
        b. Replace source LDRB with MOV Wn, #1 (hardcode locked)
        c. Replace sink STRB Rt with WZR (zero out lock state write)
   4. Hide the unlock-state warning by neutering its guard branch
-  5. Force fastboot to stay enabled (non-fatal: warns if the guard is absent)
 """
 
 from __future__ import annotations
 
 import argparse
 import sys
-import warnings
 from pathlib import Path
 
 from .bootstate import BOOT_PATCH, BOOT_PATTERN, patch_bootstate
 from .device_state import patch_device_state
-from .forceenablefastboot import patch_fastboot
 from .warning import patch_unlock_warning
 
 
@@ -38,10 +35,6 @@ def patch_efi(buf: bytearray) -> bytearray:
     patch_device_state(buf)
     lock_var_disp = patch_bootstate(buf)
     patch_unlock_warning(buf, lock_var_disp)
-    try:
-        patch_fastboot(buf)
-    except ValueError as exc:
-        warnings.warn(f"fastboot patch not applied: {exc}", stacklevel=2)
     return buf
 
 
@@ -69,7 +62,6 @@ __all__ = [
     "patch_bootstate",
     "patch_device_state",
     "patch_efi",
-    "patch_fastboot",
     "patch_gbl",
     "patch_unlock_warning",
 ]
