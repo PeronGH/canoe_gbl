@@ -12,6 +12,11 @@ UNLOCKED = b"unlocked"
 LOCKED = b"locked"
 DEVICE_STATE_PROP = b"androidboot.vbmeta.device_state"
 
+# The device_state ADRP+ADD may trail the unlocked/locked pairs rather than sit
+# immediately after them. Offsets are measured from the start of the unlocked
+# pair and mirror the C patcher's i+16..i+40 byte scan.
+DEVICE_STATE_WINDOW = range(4 * INSN_SIZE, 10 * INSN_SIZE + 1, INSN_SIZE)
+
 
 @dataclass(frozen=True)
 class AdrlPair:
@@ -20,9 +25,13 @@ class AdrlPair:
 
 
 @dataclass(frozen=True)
-class AdrlTripleMatch:
-    offset: int
-    regs: tuple[int, int, int]
+class DeviceStateMatch:
+    """An `unlocked`/`locked` ADRP+ADD pair confirmed by a nearby
+    `androidboot.vbmeta.device_state` ADRL."""
+
+    offset: int  # start of the "unlocked" pair
+    unlocked_reg: int
+    locked_off: int  # start of the "locked" pair
 
 
 def add_imm_value(insn) -> int | None:
@@ -75,33 +84,35 @@ def str_at(buf: bytearray, off: int, needle: bytes) -> bool:
     return 0 <= off <= len(buf) - len(needle) and buf[off : off + len(needle)] == needle
 
 
-def scan_adrl_triples(
-    buf: bytearray, strings: tuple[bytes, bytes, bytes]
-) -> list[AdrlTripleMatch]:
-    """Find ADRP+ADD triples where each pair resolves to the given strings."""
-    matches: list[AdrlTripleMatch] = []
-    triple_size = 6 * INSN_SIZE
+def has_device_state_adrl(buf: bytearray, base_off: int) -> bool:
+    """True if a device_state ADRP+ADD pair sits within the trailing window."""
+    for delta in DEVICE_STATE_WINDOW:
+        pair = decode_adrp_add_pair(buf, base_off + delta)
+        if pair and str_at(buf, pair.target, DEVICE_STATE_PROP):
+            return True
+    return False
+
+
+def scan_device_state_matches(buf: bytearray) -> list[DeviceStateMatch]:
+    """Find consecutive `unlocked`/`locked` ADRP+ADD pairs (distinct registers)
+    confirmed by a nearby device_state ADRL."""
+    matches: list[DeviceStateMatch] = []
+    span = DEVICE_STATE_WINDOW.stop + 2 * INSN_SIZE
     i = 0
 
-    while i <= len(buf) - triple_size:
-        pair0 = decode_adrp_add_pair(buf, i)
-        pair1 = decode_adrp_add_pair(buf, i + 2 * INSN_SIZE)
-        pair2 = decode_adrp_add_pair(buf, i + 4 * INSN_SIZE)
-        if not (pair0 and pair1 and pair2):
-            i += INSN_SIZE
-            continue
-
-        regs = (pair0.reg, pair1.reg, pair2.reg)
-        if len(set(regs)) != 3:
-            i += INSN_SIZE
-            continue
-
-        if all(
-            str_at(buf, pair.target, needle)
-            for pair, needle in zip((pair0, pair1, pair2), strings, strict=True)
+    while i <= len(buf) - span:
+        unlocked = decode_adrp_add_pair(buf, i)
+        locked = decode_adrp_add_pair(buf, i + 2 * INSN_SIZE)
+        if (
+            unlocked
+            and locked
+            and unlocked.reg != locked.reg
+            and str_at(buf, unlocked.target, UNLOCKED)
+            and str_at(buf, locked.target, LOCKED)
+            and has_device_state_adrl(buf, i)
         ):
-            matches.append(AdrlTripleMatch(i, regs))
-            i += triple_size
+            matches.append(DeviceStateMatch(i, unlocked.reg, i + 2 * INSN_SIZE))
+            i += span
         else:
             i += INSN_SIZE
 
@@ -119,13 +130,18 @@ def copy_adrl_pair(buf: bytearray, dst_off: int, src_off: int, dst_reg: int) -> 
 
 
 def patch_device_state(buf: bytearray) -> None:
-    matches = scan_adrl_triples(buf, (UNLOCKED, LOCKED, DEVICE_STATE_PROP))
+    matches = scan_device_state_matches(buf)
     if not matches:
         raise ValueError("ADRL triple (unlocked/locked/device_state) not found")
+    if len(matches) > 1:
+        raise ValueError(
+            f"Ambiguous device_state ADRL: {len(matches)} triples matched; "
+            "refusing to patch"
+        )
 
-    for match in matches:
-        copy_adrl_pair(buf, match.offset, match.offset + 2 * INSN_SIZE, match.regs[0])
+    match = matches[0]
+    copy_adrl_pair(buf, match.offset, match.locked_off, match.unlocked_reg)
 
-    verified = scan_adrl_triples(buf, (LOCKED, LOCKED, DEVICE_STATE_PROP))
-    if not verified:
-        raise ValueError("ADRL verification failed")
+    patched = decode_adrp_add_pair(buf, match.offset)
+    if not (patched and str_at(buf, patched.target, LOCKED)):
+        raise ValueError("ADRL verification failed: unlocked pair does not read locked")

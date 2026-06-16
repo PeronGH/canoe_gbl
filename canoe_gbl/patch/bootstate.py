@@ -36,6 +36,19 @@ class StackBounce:
 
 
 @dataclass(frozen=True)
+class SourceLdrb:
+    """The `LDRB Wt, [Xn, #disp]` that loads the lock-state global variable.
+
+    `disp` identifies the variable and is reused to confirm the unlock-warning
+    guard reads the same byte (see :mod:`canoe_gbl.patch.warning`).
+    """
+
+    offset: int
+    reg: int
+    disp: int
+
+
+@dataclass(frozen=True)
 class Taint:
     kind: str
     value: int
@@ -189,12 +202,14 @@ def patch_strb_rt_to_wzr(buf: bytearray, off: int) -> None:
     write_u32(buf, off, set_rd(read_u32(buf, off), 31))
 
 
-def patch_bootstate_source(
-    buf: bytearray, anchor_off: int, target_reg: int
-) -> tuple[int, int]:
-    """Trace backward from anchor to find source LDRB. Patch it to MOV Wn, #1."""
+def trace_to_source_ldrb(
+    buf: bytearray, start_off: int, target_reg: int
+) -> SourceLdrb | None:
+    """Trace `target_reg` backward through stack spill/reload bounces to the
+    source `LDRB Wt, [Xn(!=SP), #disp]`. Returns None when no clean source is
+    reachable (no matching spill, too many bounces, or function start hit)."""
     current = target_reg
-    search_off = anchor_off - INSN_SIZE
+    search_off = start_off - INSN_SIZE
     bounces = 0
 
     while search_off >= 0:
@@ -204,24 +219,31 @@ def patch_bootstate_source(
                 bounce, stack_disp = bounce_match
                 spill = find_prior_stack_spill(buf, off - INSN_SIZE, bounce, stack_disp)
                 if spill is None:
-                    raise ValueError(
-                        "No matching "
-                        f"{bounce.spill_name} for reload bounce at 0x{off:X}"
-                    )
+                    return None
                 spill_off, current = spill
                 search_off = spill_off - INSN_SIZE
                 bounces += 1
                 if bounces > MAX_TRACE_BOUNCES:
-                    raise ValueError("Too many bounces")
+                    return None
                 break
 
             if is_bootstate_source_ldrb(insn, current):
-                write_u32(buf, off, mov_w_imm(current, 1))
-                return off, current
+                return SourceLdrb(off, current, disp(insn))
         else:
             break
 
-    raise ValueError(f"Source LDRB not found for W{target_reg}")
+    return None
+
+
+def patch_bootstate_source(
+    buf: bytearray, anchor_off: int, target_reg: int
+) -> SourceLdrb:
+    """Trace backward from anchor to find source LDRB. Patch it to MOV Wn, #1."""
+    source = trace_to_source_ldrb(buf, anchor_off, target_reg)
+    if source is None:
+        raise ValueError(f"Source LDRB not found for W{target_reg}")
+    write_u32(buf, source.offset, mov_w_imm(source.reg, 1))
+    return source
 
 
 def patch_bootstate_sink(
@@ -264,7 +286,10 @@ def patch_bootstate_sink(
     raise ValueError(f"Sink STRB not found after anchor 0x{anchor_off:X}")
 
 
-def patch_bootstate(buf: bytearray) -> None:
+def patch_bootstate(buf: bytearray) -> int:
+    """Force the locked boot state. Returns the lock-state variable's
+    displacement, used to anchor the unlock-warning patch."""
     anchor, lock_reg = find_and_patch_boot_pattern(buf)
-    ldrb_off, src_reg = patch_bootstate_source(buf, anchor, lock_reg)
-    patch_bootstate_sink(buf, ldrb_off, src_reg, anchor)
+    source = patch_bootstate_source(buf, anchor, lock_reg)
+    patch_bootstate_sink(buf, source.offset, source.reg, anchor)
+    return source.disp
