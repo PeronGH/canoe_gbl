@@ -8,14 +8,14 @@ Applies these patches in order:
        b. Replace source LDRB with MOV Wn, #1 (hardcode locked)
        c. Replace sink STRB Rt with WZR (zero out lock state write)
   4. Hide the unlock-state warning by neutering its guard branch
-
-Optionally (opt-in), force fastboot to stay enabled.
+  5. Force fastboot to stay enabled (non-fatal: warns if the guard is absent)
 """
 
 from __future__ import annotations
 
 import argparse
 import sys
+import warnings
 from pathlib import Path
 
 from .bootstate import BOOT_PATCH, BOOT_PATTERN, patch_bootstate
@@ -33,13 +33,15 @@ def patch_gbl(buf: bytearray) -> None:
     buf[idx : idx + len(replacement)] = replacement
 
 
-def patch_efi(buf: bytearray, *, enable_fastboot: bool = False) -> bytearray:
+def patch_efi(buf: bytearray) -> bytearray:
     patch_gbl(buf)
     patch_device_state(buf)
     lock_var_disp = patch_bootstate(buf)
     patch_unlock_warning(buf, lock_var_disp)
-    if enable_fastboot:
+    try:
         patch_fastboot(buf)
+    except ValueError as exc:
+        warnings.warn(f"fastboot patch not applied: {exc}", stacklevel=2)
     return buf
 
 
@@ -47,11 +49,6 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Patch LinuxLoader.efi")
     parser.add_argument("input", type=Path, help="Input EFI file")
     parser.add_argument("-o", "--output", type=Path, required=True)
-    parser.add_argument(
-        "--enable-fastboot",
-        action="store_true",
-        help="Also force fastboot to stay enabled (testing patch)",
-    )
     args = parser.parse_args(argv)
 
     if not args.input.exists():
@@ -59,7 +56,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     buf = bytearray(args.input.read_bytes())
-    patch_efi(buf, enable_fastboot=args.enable_fastboot)
+    patch_efi(buf)
     args.output.write_bytes(buf)
     print(f"Patched {len(buf)} bytes to {args.output}")
     return 0

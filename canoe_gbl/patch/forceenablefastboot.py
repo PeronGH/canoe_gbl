@@ -4,8 +4,8 @@ A `CBZ {Wt,Xt}, <skip>` guards the "fastboot_unlock_verify error and reboot."
 path. Rewriting it to an unconditional `B` (keeping the branch target) makes the
 loader always skip the reboot, leaving fastboot available.
 
-This mirrors the C patcher's testing-only patch (gated behind
-ENABLE_TESTING_PATCHS) and is therefore opt-in here too.
+Applied unconditionally by :func:`canoe_gbl.patch.patch_efi`, which treats a
+missing guard as a non-fatal warning.
 """
 
 from __future__ import annotations
