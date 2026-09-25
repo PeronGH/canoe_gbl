@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 import struct
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import capstone.arm64_const as _ac
-from capstone import CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN, Cs
+from capstone import CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN, Cs, CsInsn
 
 _md = Cs(CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN)
 _md.detail = True
 
 INSN_SIZE = 4
-PACIASP = 0xD503233F
 
 _REG_NUM: dict[int, int] = {
     _ac.ARM64_REG_SP: 31,
@@ -29,11 +29,13 @@ _W_REGS = {getattr(_ac, f"ARM64_REG_W{_i}") for _i in range(31)} | {_ac.ARM64_RE
 @dataclass(frozen=True)
 class InsnPattern:
     asm: str
-    mask: int
-    value: int
+    signature: bytes | Callable[[CsInsn], bool]
 
-    def matches(self, raw: int) -> bool:
-        return raw & self.mask == self.value
+    def matches(self, buf: bytearray, off: int) -> bool:
+        if isinstance(self.signature, bytes):
+            return buf[off : off + INSN_SIZE] == self.signature
+        insn = disasm(buf, off)
+        return insn is not None and self.signature(insn)
 
 
 @dataclass(frozen=True)
@@ -112,17 +114,17 @@ def is_x_sized(insn) -> bool:
 
 def iter_backward_insns(buf: bytearray, start_off: int):
     for off in range(start_off, -1, -INSN_SIZE):
-        if read_u32(buf, off) == PACIASP:
-            break
         insn = disasm(buf, off)
         if insn:
+            if insn.id == _ac.ARM64_INS_PACIASP:
+                break
             yield off, insn
 
 
 def iter_forward_insns(buf: bytearray, start_off: int):
     for off in range(start_off, len(buf) - INSN_SIZE, INSN_SIZE):
-        if read_u32(buf, off) == PACIASP:
-            break
         insn = disasm(buf, off)
         if insn:
+            if insn.id == _ac.ARM64_INS_PACIASP:
+                break
             yield off, insn

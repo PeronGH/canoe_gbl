@@ -10,6 +10,7 @@ from .core import (
     INSN_SIZE,
     InsnPatch,
     InsnPattern,
+    disasm,
     disp,
     is_reg_to_reg_mov,
     is_sp_based,
@@ -115,15 +116,40 @@ STACK_RELOAD_BOUNCES = (
     StackBounce(_ac.ARM64_INS_LDRB, _ac.ARM64_INS_STRB, "STRB", False),
 )
 
+
+def matches_boot_guard(insn) -> bool:
+    return (
+        insn.id == _ac.ARM64_INS_CBZ
+        and not is_x_sized(insn)
+        # The upstream signature permits only imm19 values 0 through 7.
+        and insn.operands[1].imm - insn.address in range(0, 32, INSN_SIZE)
+    )
+
+
+def matches_boot_load(insn) -> bool:
+    if insn.id != _ac.ARM64_INS_LDR or insn.operands[1].type != _ac.ARM64_OP_MEM:
+        return False
+    mem = insn.operands[1].mem
+    return (
+        insn.operands[0].reg == _ac.ARM64_REG_X8
+        and not insn.writeback
+        and mem.index == _ac.ARM64_REG_INVALID
+        # Preserve the upstream signature's restricted base and offset fields.
+        and reg_num(mem.base) in (7, 15, 23, 31)
+        and mem.disp in range(0, 512, 8)
+    )
+
+
+# Fixed signatures retain upstream's exact encoding, not equivalent aliases.
 BOOT_PATTERN: list[InsnPattern] = [
-    InsnPattern("cbz w<lock_reg>, <skip>", 0xFFFFFF00, 0x34000000),
-    InsnPattern("mov w8, #1", 0xFFFFFFFF, mov_w_imm(8, 1)),
-    InsnPattern("b <after_load>", 0xFFFFFFFF, 0x14000006),
-    InsnPattern("ldr x8, [x?, #?]", 0xFFFF00FF, 0xF94000E8),
-    InsnPattern("ldrb w8, [x8]", 0xFFFFFFFF, 0x39400108),
-    InsnPattern("cmp w8, #0", 0xFFFFFFFF, 0x7100011F),
-    InsnPattern("cset w8, ne", 0xFFFFFFFF, 0x1A9F07E8),
-    InsnPattern("lsl w8, w8, #1", 0xFFFFFFFF, 0x531F7908),
+    InsnPattern("cbz w<lock_reg>, <skip>", matches_boot_guard),
+    InsnPattern("mov w8, #1", bytes.fromhex("28 00 80 52")),
+    InsnPattern("b <after_load>", bytes.fromhex("06 00 00 14")),
+    InsnPattern("ldr x8, [x?, #?]", matches_boot_load),
+    InsnPattern("ldrb w8, [x8]", bytes.fromhex("08 01 40 39")),
+    InsnPattern("cmp w8, #0", bytes.fromhex("1f 01 00 71")),
+    InsnPattern("cset w8, ne", bytes.fromhex("e8 07 9f 1a")),
+    InsnPattern("lsl w8, w8, #1", bytes.fromhex("08 79 1f 53")),
 ]
 
 BOOT_PATCH: list[InsnPatch | None] = [
@@ -147,10 +173,10 @@ def find_and_patch_boot_pattern(buf: bytearray) -> tuple[int, int]:
     i = 0
     while i <= len(buf) - pattern_size:
         if all(
-            pattern.matches(read_u32(buf, i + j * INSN_SIZE))
+            pattern.matches(buf, i + j * INSN_SIZE)
             for j, pattern in enumerate(BOOT_PATTERN)
         ):
-            lock_reg = read_u32(buf, i) & 0x1F
+            lock_reg = rt_num(disasm(buf, i))
             anchor = i
             for j, patch in enumerate(BOOT_PATCH):
                 if patch is not None:

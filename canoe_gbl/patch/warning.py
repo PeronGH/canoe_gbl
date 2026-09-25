@@ -8,16 +8,22 @@ patch hardcoded, and rewrite it to `CBZ WZR` so the branch is always taken.
 
 from __future__ import annotations
 
+import capstone.arm64_const as _ac
+
 from .bootstate import trace_to_source_ldrb
-from .core import INSN_SIZE, PACIASP, read_u32, set_rd, write_u32
+from .core import (
+    INSN_SIZE,
+    disasm,
+    is_x_sized,
+    read_u32,
+    rt_num,
+    set_rd,
+    write_u32,
+)
 from .device_state import decode_adrp_add_pair, str_at
 
 ORANGE_STATE = b"Orange State\n"
 UNTRUSTED = b"Your device has been unlocked and can't be trusted\n"
-
-# CBZ Wt: full top byte fixed (sf=0 -> 32-bit, op=0 -> CBZ).
-CBZ_W_MASK = 0xFF000000
-CBZ_W_VALUE = 0x34000000
 
 # How far back from the message ADRL the guard branch may sit.
 WARNING_SEARCH_BYTES = 64
@@ -48,19 +54,21 @@ def patch_unlock_warning(buf: bytearray, lock_var_disp: int) -> int:
 
     search_floor = max(warn_off - WARNING_SEARCH_BYTES, 0)
     for off in range(warn_off - INSN_SIZE, search_floor - INSN_SIZE, -INSN_SIZE):
-        raw = read_u32(buf, off)
-        if raw == PACIASP:
+        insn = disasm(buf, off)
+        if not insn:
+            continue
+        if insn.id == _ac.ARM64_INS_PACIASP:
             raise ValueError(
                 f"Reached function start at 0x{off:X} before warning guard CBZ"
             )
-        if raw & CBZ_W_MASK != CBZ_W_VALUE:
+        if insn.id != _ac.ARM64_INS_CBZ or is_x_sized(insn):
             continue
 
-        source = trace_to_source_ldrb(buf, off, raw & 0x1F)
+        source = trace_to_source_ldrb(buf, off, rt_num(insn))
         if source is None or source.disp != lock_var_disp:
             continue
 
-        write_u32(buf, off, set_rd(raw, 31))
+        write_u32(buf, off, set_rd(read_u32(buf, off), 31))
         return off
 
     raise ValueError("Unlock warning guard CBZ not found")
