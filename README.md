@@ -36,6 +36,7 @@ Other approaches (skip the data wipe, modify other partitions, etc.) might work 
 4. Patches the boot state check sequence
 5. Hardcodes the lock state read to 1 via backward data-flow tracing
 6. Zeros out the lock state write via forward taint tracking
+7. Bypasses the OPlus `fastboot_unlock_verify` restriction
 
 The TEE derives its boot state from ABL. Since the patched GBL reports locked state, the hardware key attestation passes, which gives STRONG Play Integrity and Widevine L1.
 
